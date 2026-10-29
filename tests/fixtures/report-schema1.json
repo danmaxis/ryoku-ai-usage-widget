@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "primary": "anthropic",
+  "entries": [
+    {
+      "id": "anthropic",
+      "name": "anthropic",
+      "display_name": "Sonnet",
+      "short_name": "cld",
+      "icon": "󰚩",
+      "brand": "anthropic",
+      "plan": "Claude Pro",
+      "status": "ready",
+      "error": null,
+      "stale": false,
+      "fetched_at": "2026-10-15T14:43:32.735379833Z",
+      "reset_credits": {
+        "available": 1,
+        "credits": [
+          {
+            "title": "Fixture reset credit (expira em 7d)",
+            "expires_at": "2026-10-22T16:00:00Z"
+          }
+        ]
+      },
+      "metrics": [
+        {
+          "label": "Session (5h)",
+          "percent": 91,
+          "value": "91%",
+          "headline": "percent",
+          "severity": "critical",
+          "detail": "Resets in 1h 56m · 61% elapsed · 30pts ahead",
+          "reset_at": "2026-10-15T16:39:59.561578Z",
+          "window_secs": 18000
+        },
+        {
+          "label": "Weekly (7d)",
+          "percent": 89,
+          "value": "89%",
+          "headline": "percent",
+          "severity": "high",
+          "detail": "Resets in 1d 8h · 80% elapsed · 9pts ahead",
+          "reset_at": "2026-10-16T22:59:59.561596Z",
+          "window_secs": 604800
+        }
+      ],
+      "sections": [
+        {
+          "type": "spacer"
+        },
+        {
+          "type": "metric",
+          "label": "Session (5h)",
+          "percent": 91,
+          "value": "91%",
+          "headline": "percent",
+          "severity": "critical",
+          "detail": "Resets in 1h 56m",
+          "reset_at": "2026-10-15T16:39:59.561578Z",
+          "window_secs": 18000
+        },
+        {
+          "type": "block",
+          "label": "Reset credits",
+          "body": [
+            "Fixture reset credit (expira em 7d)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copilot",
+      "name": "copilot",
+      "display_name": "GitHub Copilot",
+      "short_name": "ghc",
+      "icon": "󰊤",
+      "brand": "copilot",
+      "plan": "GitHub Copilot individual",
+      "status": "ready",
+      "error": null,
+      "stale": false,
+      "fetched_at": "2026-10-15T14:43:34.267377167Z",
+      "reset_credits": null,
+      "metrics": [
+        {
+          "label": "Premium requests",
+          "percent": 100,
+          "value": "100%",
+          "headline": "percent",
+          "severity": "critical",
+          "detail": "0 of 0 used",
+          "reset_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "label": "Chat",
+          "percent": 0,
+          "value": "0%",
+          "headline": "percent",
+          "severity": "low",
+          "detail": "0 of 200 used",
+          "reset_at": "2026-11-01T00:00:00Z"
+        }
+      ],
+      "sections": [
+        {
+          "type": "spacer"
+        },
+        {
+          "type": "text",
+          "label": "Resets",
+          "value": "16d 9h"
+        }
+      ]
+    },
+    {
+      "id": "zai",
+      "name": "zai",
+      "display_name": "Z.AI",
+      "short_name": "zai",
+      "icon": "zai",
+      "brand": "zai",
+      "plan": null,
+      "status": "error",
+      "error": "credentials error: no API key set for [zai] (FIXTURE).",
+      "stale": false,
+      "fetched_at": null,
+      "reset_credits": null,
+      "metrics": [],
+      "sections": []
+    },
+    {
+      "id": "openai@work",
+      "name": "openai",
+      "display_name": "Codex · work",
+      "short_name": "gpt",
+      "icon": "󱢆",
+      "brand": "openai",
+      "plan": "ChatGPT Plus",
+      "status": "ready",
+      "error": null,
+      "stale": true,
+      "fetched_at": "2026-10-15T12:00:00Z",
+      "reset_credits": null,
+      "metrics": [
+        {
+          "label": "Codex 5h",
+          "percent": 42,
+          "value": "42%",
+          "headline": "percent",
+          "severity": "low",
+          "detail": "Resets in 2h 25m",
+          "reset_at": "2026-10-15T17:08:54Z",
+          "window_secs": 18000
+        }
+      ],
+      "sections": [
+        {
+          "type": "spacer"
+        },
+        {
+          "type": "metric",
+          "label": "Codex 5h",
+          "percent": 42,
+          "value": "42%",
+          "headline": "percent",
+          "severity": "low",
+          "detail": "Resets in 2h 25m",
+          "reset_at": "2026-10-15T17:08:54Z",
+          "window_secs": 18000
+        }
+      ]
+    }
+  ]
+}

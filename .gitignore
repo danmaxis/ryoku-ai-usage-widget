@@ -1,0 +1,7 @@
+.DS_Store
+*.log
+*.tmp
+
+# sujeira de execucao
+__pycache__/
+*.pyc
