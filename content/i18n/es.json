@@ -36,5 +36,8 @@
   "NO PROVIDERS": "SIN PROVEEDORES",
   "Compact": "Compacto",
   "refresh failed, showing earlier reading": "falló la actualización, mostrando lectura anterior",
-  "Expanded": "Expandido"
+  "Expanded": "Expandido",
+  "Collapse": "Contraer",
+  "Copied": "Copiado",
+  "Copy keybind": "Copiar atajo"
 }

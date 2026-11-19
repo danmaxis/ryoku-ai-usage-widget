@@ -303,8 +303,14 @@ def bancada(tmp_path_factory):
         {"name": "order-highest", "settings": dict(base, order="highest")},
         {"name": "order-lowest", "settings": dict(base, order="lowest")},
         {"name": "order-alphabetical", "settings": dict(base, order="alphabetical")},
-        {"name": "detail-on", "settings": dict(base, showMetricDetail=True)},
-        {"name": "detail-off", "settings": dict(base, showMetricDetail=False)},
+        # R4: o detalhe de um secundário deixou de estar sempre na lista e passou
+        # a viver na GAVETA. Os dois casos abrem a gaveta do copilot para que a
+        # asserção continue olhando o mesmo conteúdo, na superfície nova — sem
+        # isso "CHAT"/"PREMIUM REQUESTS" sumiriam e o teste mediria só a pílula.
+        {"name": "detail-on", "settings": dict(base, showMetricDetail=True),
+         "drawer": "copilot"},
+        {"name": "detail-off", "settings": dict(base, showMetricDetail=False),
+         "drawer": "copilot"},
         {"name": "sec-on", "settings": dict(base, showSecondaries=True)},
         {"name": "sec-off", "settings": dict(base, showSecondaries=False)},
         {"name": "cap-1", "settings": dict(base, maxSecondary=1)},
@@ -317,10 +323,24 @@ def bancada(tmp_path_factory):
     dumps.update(_run_cases(lote_b, tmp, original, cache, cfg))
 
     # Lote C — rótulos e valores inválidos.
+    #
+    # `ref-plain` existe para ser a REFERÊNCIA das comparações de "caiu no
+    # default": as settings são exatamente as de `base` e NENHUMA gaveta é
+    # aberta. Antes de R4 a referência era `label-name`, mas ele passou a abrir a
+    # gaveta do copilot e uma gaveta aberta muda o censo — comparar um caso sem
+    # gaveta contra um com gaveta acusaria "UI diferente" sem defeito nenhum.
     lote_c = [
-        {"name": "label-name", "settings": dict(base, secondaryLabel="name")},
+        {"name": "ref-plain", "settings": dict(base)},
+        # As métricas de um secundário mostram-se na GAVETA (R4). Estes dois casos
+        # abrem a de copilot porque afirmam sobre valores por métrica ("0%",
+        # "PREMIUM REQUESTS", "CHAT"). `label-short` NÃO abre: ele afirma ausência
+        # de nome exibido, e a gaveta também carrega o rótulo — abri-la lá daria
+        # um falso positivo.
+        {"name": "label-name", "settings": dict(base, secondaryLabel="name"),
+         "drawer": "copilot"},
         {"name": "label-short", "settings": dict(base, secondaryLabel="short")},
-        {"name": "label-plan", "settings": dict(base, secondaryLabel="plan", maxSecondary=12)},
+        {"name": "label-plan", "settings": dict(base, secondaryLabel="plan", maxSecondary=12),
+         "drawer": "copilot"},
         {"name": "bad-accent", "settings": dict(base, accent="nao-existe")},
         {"name": "bad-order", "settings": dict(base, order="BOGUS")},
         {"name": "bad-secondary", "settings": dict(base, secondaryLabel="nao-existe")},
@@ -793,7 +813,7 @@ def test_valor_invalido_de_setting_cai_no_comportamento_seguro(bancada, caso, ca
         "o teste cairia no fallback por ausência, não por valor inválido"
     )
     invalido = bancada[caso]
-    assert _assinatura(invalido) == _assinatura(bancada["label-name"]), (
+    assert _assinatura(invalido) == _assinatura(bancada["ref-plain"]), (
         f"{campo} inválido mudou a UI renderizada em vez de cair no default seguro"
     )
 

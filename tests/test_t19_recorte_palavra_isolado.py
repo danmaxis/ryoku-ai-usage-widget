@@ -619,7 +619,7 @@ class Render:
 
 
 def _rodar_render(relatorio: dict, tmp: Path, *, nome: str,
-                  width: int = 260) -> Render:
+                  width: int = 260, drawer_id: str = "kiro") -> Render:
     """Um processo quickshell offline, com o FAKE `ai-usagebar` no PATH."""
     pasta = tmp / f"fakebin-{nome}"
     pasta.mkdir(parents=True, exist_ok=True)
@@ -640,6 +640,10 @@ def _rodar_render(relatorio: dict, tmp: Path, *, nome: str,
     env["T19R_STATE_DIR"] = str(tmp / f"state-{nome}")
     env["T19R_WIDTH"] = str(width)
     env["T19R_SETTLE_MS"] = "3500"
+    # R4: the provider's diagnostic line moved from the secondary LIST into the
+    # DRAWER. The drawer has to be open for the text to exist in the tree at all,
+    # so every render case here opens the one holding the failing provider.
+    env["T19R_DRAWER_ID"] = drawer_id
 
     try:
         proc = subprocess.run(

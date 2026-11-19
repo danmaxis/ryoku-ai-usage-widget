@@ -10,6 +10,10 @@
 //   T9_CASES      JSON array de { "name": string, "settings": object }
 //   T9_PLUG_DIR   pasta do plugin (o avaliador aponta para a árvore sob teste)
 //   T9_STATE_DIR  stateDir sintético (default /tmp/t9-state)
+//   T9_DRAWER_ID  id do secundário cuja GAVETA abre antes do censo (default "")
+//                 Sem isto o censo só veria a pílula. Depois de R4 o detalhe de
+//                 um secundário mora na gaveta, então os casos que mediam esse
+//                 detalhe na lista antiga precisam dizer qual gaveta abrir.
 //
 // Saída (stdout, uma linha por registro; o consumidor parseia por prefixo):
 //   SINGLETON|<accent>|<sun>|<cream>|<gold>     cores do host no momento do caso
@@ -33,6 +37,9 @@ ShellRoot {
 
     property var cases: JSON.parse(Quickshell.env("T9_CASES") || "[]")
     property string plugDir: Quickshell.env("T9_PLUG_DIR") || ""
+    // Which secondary's drawer to open before the census (R4). Per CASE, because
+    // a drawer left open would leak detail into the next case's text dump.
+    property string drawerId: ""
     property int idx: 0
     property var api: null
 
@@ -67,15 +74,19 @@ ShellRoot {
                 item.pluginApi = root.api
                 item.s = 1
                 item.active = true
-                item.density = "full"
                 item.widthBudget = 900
+                // The host still sets `density`; R4 removed the second format, so
+                // the view no longer reads it. Set it anyway: a view that started
+                // depending on it again would be caught by the census diff.
+                item.density = "full"
             } catch (e) { console.log("VIEW_ERR|" + e) }
-            settle.restart()
+            openDrawer.restart()
         }
     }
 
     function beginCase() {
         if (root.idx >= root.cases.length) { Qt.quit(); return }
+        root.drawerId = String(root.cases[root.idx].drawer || "")
         root.api = root.mkApi(root.cases[root.idx].settings)
         viewL.active = false; viewL.setSource("")
         mainL.active = false; mainL.setSource("")
@@ -85,6 +96,22 @@ ShellRoot {
     }
 
     Timer { id: boot; interval: 350; running: true; onTriggered: root.beginCase() }
+
+    // The drawer is opened AFTER the model lands, never at load time. Measured
+    // 2026-10-29: `openDrawerId` set in `onLoaded` is wiped by the view's own
+    // `reconcileDrawer()` the moment the first model arrives (no secondary
+    // matches yet), so the census saw a closed drawer and the case passed with
+    // the detail invisible.
+    Timer {
+        id: openDrawer; interval: 250; repeat: false
+        onTriggered: {
+            try {
+                var v = viewL.item
+                if (v && root.drawerId !== "") v.openDrawerId = root.drawerId
+            } catch (e) {}
+            settle.start()
+        }
+    }
 
     Timer {
         id: settle; interval: 950; repeat: false

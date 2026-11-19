@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import Ryoku.PluginKit
 import Ryoku.PluginKit.Singletons
@@ -29,12 +30,40 @@ Item {
     property string density: "full"
     property real s: 1
     property real widthBudget: 0
+    // Total height this item may occupy, in the same scaled pixels as
+    // `widthBudget`. The host does not pass one today (measured on ryoku 1.0.9:
+    // `PluginPopouts.qml` only sets `widthBudget`), so 0 means "derive it from
+    // the screen". It exists so a host — or a test — can state the limit
+    // instead of the view guessing it.
+    property real heightBudget: 0
 
 
     readonly property var service: pluginApi ? pluginApi.mainInstance : null
     readonly property var model: service ? service.model : null
     readonly property var primaryProvider: model ? model.primary : null
     readonly property var secondaryProviders: model && model.secondary ? model.secondary : []
+
+    // The pills the grid actually draws. `maxSecondary` is enforced by the
+    // collector (it limits the list BEFORE serializing, so `model.secondary` is
+    // usually already cut), but the view applies it too: the guarantee "at most N
+    // pills" must not depend on which producer handed us the model. Without this,
+    // a model from any other source made the grid draw more pills than the
+    // setting allows while the header counted a different number.
+    readonly property int maxSecondaryCount: {
+        var v = cfg ? Number(cfg.maxSecondary) : NaN;
+        // Same rule as the service's `maxSecondary`, character for character:
+        // a negative value is NOT "zero" — it falls back to the default 6, the
+        // same way a non-numeric one does. The service clamps before the argv,
+        // so a mismatch here would show a number the collector never produced
+        // (measured: `-2` rendered 0 pills instead of 6).
+        return (isFinite(v) && v >= 0) ? Math.min(v, 12) : 6;
+    }
+    readonly property var visibleSecondaries: {
+        var all = root.secondaryProviders;
+        if (!all) return [];
+        var n = root.maxSecondaryCount;
+        return all.length > n ? all.slice(0, n) : all;
+    }
     readonly property int totalSecondary: {
         var n = model ? Number(model.total_providers) : NaN;
         return isFinite(n) ? Math.max(0, n - (primaryProvider ? 1 : 0)) : secondaryProviders.length;
@@ -107,7 +136,7 @@ Item {
     // ---- i18n ---------------------------------------------------------------
     // The plugin CANNOT use Ryoku's I18n: R4 rejects `import Ryoku.Ui`
     // (plugin_audit.go:228, "internal-import") and I18n lives under
-    // Ryoku.Ui.Singletons; PluginKit does not re-export it. Reading shell.json to
+    // Ryoku.Ui.Singletons; PluginKit does not re-export it. Reading the shell's own config file to
     // learn the shell's language is ALSO blocked (R5, plugin_audit.go:428, even
     // for a read). So the plugin carries its own catalogue, read from
     // `pluginApi.pluginDir` — a field the host exposes (docs/plugins.md:285).
@@ -325,55 +354,157 @@ Item {
         if (typeof service.refresh === "function") service.refresh();
     }
 
-    // In compact mode each provider shows ONE metric — the most critical, measured
-    // by percentage, the same rule as `headline_metric` (F020). The others stay
-    // behind a per-provider expander. The point is height: seven providers used to
-    // fill the whole popout, and most of that was detail nobody reads every time.
+    // ---- layout: grid of pills + one drawer (T33-T39) ----------------------
+    // There is ONE format now. The expanded/compact pair is gone: it needed two
+    // stacked buttons and a `+N more` chip the owner did not recognise as a
+    // control (Att1, 2026-10-29). The grid gives height back; the drawer pays for
+    // it with detail on demand.
+    readonly property int columns: {
+        var v = cfg ? Number(cfg.columns) : NaN;
+        if (!isFinite(v)) return 2;
+        return Math.max(2, Math.min(4, Math.round(v)));
+    }
+
+    // Width of ONE pill before scaling, and the popout width that results.
+    // Measured 2026-10-29: contentWidth was 406 at s=1, so two 197px pills plus
+    // the 6px gap fit exactly; three do not. Hence the derivation, and hence
+    // `implicitWidth` being a FUNCTION of `columns` — PluginPopouts.qml:172-188
+    // uses the content's implicitWidth when the placement does not fix `width`,
+    // which is the case in the placement this was developed against.
+    readonly property real pillTargetWidth: 197
+    // Corner radius shared by the pills, so the grid speaks the same shape
+    // language as the popout card they sit in. 8 matches the shell's
+    // `radiusWidget`, which is what the popout body uses; see the Pill's radius
+    // for why it cannot be imported.
+    readonly property real pillCorner: 8
+    readonly property real baseWidth: 2 * pad + root.columns * root.pillTargetWidth
+                                        + (root.columns - 1) * gap + 25
+
+    // Direction the drawer opens. `down` is the default: it is the only one that
+    // cannot collide with the popout's width budget.
+    readonly property string drawerDirection: {
+        var v = cfg && cfg.drawerDirection ? String(cfg.drawerDirection) : "down";
+        return ["down", "left", "right"].indexOf(v) >= 0 ? v : "down";
+    }
+
+    // Ceiling of the drawer, in the unscaled units the manifest uses.
+    // TWO terms (T32 spike): the setting, capped by a fraction of the tallest
+    // screen. `Quickshell.screens` was measured to work INSIDE a plugin
+    // (harness: screens=1, 800x800), but it can be empty offscreen, so the
+    // setting alone is the fallback.
+    readonly property int drawerMaxHeightSetting: {
+        var v = cfg ? Number(cfg.drawerMaxHeight) : NaN;
+        if (!isFinite(v)) return 320;
+        return Math.max(160, Math.min(480, Math.round(v)));
+    }
+    readonly property real screenHeight: {
+        var list = Quickshell.screens;
+        if (!list || !list.length) return 0;
+        var best = 0;
+        for (var i = 0; i < list.length; i++) {
+            var h = list[i] ? Number(list[i].height) : NaN;
+            if (isFinite(h) && h > best) best = h;
+        }
+        return best;
+    }
+    // The drawer may never claim more than 60% of the screen. With no screen
+    // information the setting alone decides — a deterministic fallback beats a
+    // guess (the harness runs offscreen at 800x800).
+    readonly property real drawerMaxHeight: {
+        var want = root.drawerMaxHeightSetting * root.s;
+        var capByScreen = root.screenHeight > 0 ? root.screenHeight * 0.6 : 0;
+        return capByScreen > 0 ? Math.min(want, capByScreen) : want;
+    }
+
+    // ---- `down` drawer vs. the screen (R5: T48, T49) -------------------------
+    // The host sizes the popout to this item's implicit height, centres it and
+    // CLIPS what does not fit (`Popout.qml`: `bodyClip.clip: true`), with no
+    // height passed in. A `down` drawer that only ever adds height therefore
+    // pushed the footer and half of `Collapse` off the screen on a popout that
+    // already filled it (owner's smoke, 2026-11-10: closed popout at ~92% of
+    // the usable height).
     //
-    // Expansion state is VOLATILE (decided by the owner on 2026-10-28): it lives in
-    // this Item and dies with the surface. Persisting it would require writing to
-    // `stateDir`, and this plugin is documented as read-only — R8 allows the write,
-    // but the README promises no writing, and a stale expansion set outliving the
-    // providers it names is worse than starting fresh.
-    readonly property bool compactByDefault: {
-        var v = cfg && cfg.density ? String(cfg.density) : "expanded";
-        return v === "compact";
+    // The screen this item is on, not the tallest one: with monitors of
+    // different heights the tallest would promise room that is not there.
+    readonly property real ownScreenHeight: {
+        var h = Number(Screen.height);
+        return (isFinite(h) && h > 0) ? h : root.screenHeight;
     }
-    // The mode actually rendered. `null` follows the setting; `true`/`false` is a
-    // VIEW-LOCAL override set by the toggle button.
+    // What the host keeps for itself, top and bottom: its own 16*s inset around
+    // the content plus the bar/frame band. Measured on the real shell
+    // (2026-11-17, s = 1.926, 1280 px screen): the band ends 51 px from the
+    // edge, i.e. ~26.5*s. 28*s clears it by about 3 px a side; a first try at
+    // 32*s was safe but cost this very popout its only metric row.
+    readonly property real hostChromeHeight: 2 * (16 + 28) * root.s
+    // 0 = unknown: with no budget and no screen there is nothing to clamp to,
+    // and the configured ceiling alone decides (same fallback as above).
+    readonly property real heightLimit: root.heightBudget > 0 ? root.heightBudget
+        : (root.ownScreenHeight > 0
+           ? Math.max(0, root.ownScreenHeight - root.hostChromeHeight) : 0)
+    // Height of everything that is NOT the drawer. Built from positions above
+    // and below the grid on purpose: reading `col.implicitHeight` here would
+    // feed the drawer's own height back into its limit.
+    readonly property real closedHeight: 2 * root.padY + pillsArea.y + pillGrid.implicitHeight
+        + (footer.visible ? col.spacing + footer.height : 0)
+    // Free height under the grid. Negative when the closed popout is already
+    // taller than the limit.
+    readonly property real downRoom: root.heightLimit > 0
+        ? root.heightLimit - root.closedHeight : Infinity
+    // What a `down` drawer always needs: name, status line, the `+N more`
+    // counter and `Collapse`. Below this it could not even say what it cut.
+    readonly property real drawerRowGap: 4 * root.s
+    readonly property real drawerDownFixedHeight: 20 * root.s
+        + drawerTitleMeasure.implicitHeight + root.drawerRowGap
+        + drawerMetaMeasure.implicitHeight + root.drawerRowGap
+        + 22 * root.s
+    readonly property real drawerDownMinHeight: root.drawerDownFixedHeight
+        + drawerMetaMeasure.implicitHeight + root.drawerRowGap
+    // Ceiling of a `down` drawer. When the room under the grid is not enough
+    // the drawer does not grow the popout past the screen: it rises from the
+    // base instead (it is opaque and anchored there), over the grid and, if it
+    // needs more, over what sits above the grid — so the footer and `Collapse`
+    // stay where they were and opening it never makes the popout taller than a
+    // closed one that fitted.
     //
-    // Why the override has to exist: the framePopout host hands the content an
-    // `api` with `mainInstance`, `pluginSettings`, `pluginDir` and a NO-OP
-    // `saveSettings()` — there is no `saveSetting(key, value)`
-    // (PluginPopouts.qml:190-195, measured 2026-10-28). A button drawn by the view
-    // therefore CANNOT persist the density setting; it can only change what is
-    // rendered now. Volatile, which is consistent with the owner's decision that
-    // expansion state does not persist.
-    property var densityOverride: null
-    readonly property bool compactMode: root.densityOverride === null
-                                        ? root.compactByDefault
-                                        : root.densityOverride === true
-    // Ids the user expanded by hand, in compact mode. A plain object as a set;
-    // reassigned (never mutated in place) so QML sees the change.
-    property var expandedIds: ({})
-
-    function isExpanded(providerId) {
-        return root.expandedIds[String(providerId)] === true;
+    // It is NOT limited to the grid's own height. That was tried first and
+    // measured on the owner's shell (2026-11-17): grid + room came to 200 px,
+    // one metric plus the counter needs 219, so the drawer could only ever say
+    // `+2 more`. A detail panel that shows no detail is worse than one that
+    // covers the primary for as long as it is open.
+    readonly property real drawerDownCeiling: {
+        var space = pillsArea.y + pillGrid.implicitHeight + Math.max(0, root.downRoom);
+        return Math.max(root.drawerDownMinHeight, Math.min(root.drawerMaxHeight, space));
     }
 
-    function toggleExpanded(providerId) {
-        var id = String(providerId);
-        var proximo = {};
-        for (var k in root.expandedIds) proximo[k] = root.expandedIds[k];
-        if (proximo[id] === true) delete proximo[id];
-        else proximo[id] = true;
-        root.expandedIds = proximo;
+    // Which secondary the drawer shows. EMPTY STRING = closed. The key is the
+    // provider's FULL id including the account (`openai@work`), never the grid
+    // index: after a poll the same cell can hold another provider, and carrying
+    // the drawer over would attribute one vendor's numbers to another.
+    property string openDrawerId: ""
+
+    function isDrawerOpen(provider) {
+        return provider !== null && provider !== undefined
+            && root.openDrawerId !== "" && String(provider.id) === root.openDrawerId;
     }
 
-    // Which metric a provider leads with in compact mode: the highest percentage,
-    // tie-broken by report order (first wins), exactly like the collector's
-    // `headline_metric`. A metric without a percentage cannot win — it has no
-    // magnitude to compare, and picking it would be a guess.
+    function toggleDrawer(provider) {
+        if (!provider) return;
+        var id = String(provider.id);
+        // Accordion: opening one closes the previous. Decided by the owner on
+        // 2026-10-29 — the popout has no height clamp of its own (T32 measured
+        // `bodyClip.clip: true`, which TRUNCATES silently), so several drawers at
+        // once would lose content with no warning.
+        root.openDrawerId = (root.openDrawerId === id) ? "" : id;
+    }
+
+    function closeDrawer() {
+        root.openDrawerId = "";
+    }
+
+    // Which metric a provider leads with: the highest percentage, tie-broken by
+    // report order (first wins), exactly like the collector's `headline_metric`.
+    // A metric without a percentage cannot win — it has no magnitude to compare,
+    // and picking it would be a guess.
     function leadingMetric(metrics) {
         if (!metrics || metrics.length === 0) return null;
         var best = null, bestPct = -1;
@@ -389,93 +520,118 @@ Item {
         return best !== null ? best : metrics[0];
     }
 
-    // The metrics a provider actually shows, in the current mode.
-    function visibleMetrics(provider) {
-        if (!provider || !provider.metrics) return [];
-        if (!root.compactMode || root.isExpanded(provider.id)) return provider.metrics;
-        var lead = root.leadingMetric(provider.metrics);
-        return lead === null ? [] : [lead];
-    }
-
-    // How many metrics remain hidden behind the expander. TWO different questions
-    // live here and conflating them created a real bug (found by external review,
-    // 2026-10-28): "how many are hidden right now" is 0 when expanded, but the
-    // EXPANDER MUST STAY VISIBLE while expanded — otherwise the only way back is
-    // `Collapse all`, which also throws away every other provider's choice.
-    function hiddenMetricCount(provider) {
-        if (!provider || !provider.metrics) return 0;
-        if (!root.compactMode || root.isExpanded(provider.id)) return 0;
-        return Math.max(0, provider.metrics.length - root.visibleMetrics(provider).length);
-    }
-
-    // Is there anything to toggle for this provider? True whenever compact mode is
-    // on and the provider has more than one metric — regardless of the current
-    // expansion state. This is what the control's visibility uses.
-    function canToggleProvider(provider) {
-        if (!provider || !provider.metrics) return false;
-        return root.compactMode && provider.metrics.length > 1;
-    }
-
-    // How many the control should ANNOUNCE when collapsed. Separate from
-    // `hiddenMetricCount` so the label stays correct while expanded.
-    function hiddenMetricCountForLabel(provider) {
-        if (!provider || !provider.metrics) return 0;
-        return Math.max(0, provider.metrics.length - 1);
-    }
-
-    // The top button flips the WHOLE surface, which in compact mode means clearing
-    // the per-provider exceptions (collapse all) or marking every provider expanded
-    // (expand all). In expanded mode the button is absent: there is nothing to
-    // compact that the setting has not already decided.
-    readonly property bool anyProviderExpanded: {
-        for (var k in root.expandedIds) if (root.expandedIds[k] === true) return true;
-        return false;
-    }
-
-    // TWO controls, one job each.
+    // ---- drawer: what fits, and what gets cut (T37) -------------------------
+    // The drawer does NOT scroll — the owner vetoed it ("senão realmente é sinal
+    // que está carregando muita informação num painel de acompanhamento rápido",
+    // 2026-10-29). Content past the ceiling is cut at the TAIL and announced as
+    // `+N more`, in inert text.
     //
-    // They used to be ONE button with two stacked meanings — the third click in a
-    // cycle switched nothing and the only way back to the default view was a
-    // separate `Reset view` chip. The owner read that as redundancy and asked for a
-    // split (Att1, decided 2026-10-29). Each control now names its own action and
-    // never does the other's work:
-    //   mode button  — names the mode you are going TO
-    //   expand button— names what happens to the LIST, and only exists in compact
-
-    // Destination, not current state: "Compact" means "go compact".
-    function modeButtonLabel() {
-        return root.compactMode ? root.tr("Expanded") : root.tr("Compact");
+    // The cut has to be computed BEFORE drawing: T32 measured `bodyClip.clip:
+    // true` on the host, so content past the screen is truncated SILENTLY and
+    // leaning on the host would hide quotas with no warning at all.
+    //
+    // Row heights derive from the type scale, not from guessing: one metric block
+    // is its label line, the meter, and its reset line, separated by the gap.
+    readonly property real drawerMetricBlockHeight:
+        (root.fsBody + 3 * root.s) + Math.max(5 * root.s, root.fsValue)
+        + (root.fsMeta + 4 * root.s)
+    // Name + status line at the top of the drawer, always reserved.
+    readonly property real drawerHeaderHeight: root.fsTitle + root.fsMeta + 8 * root.s
+    // How many whole metric blocks fit under the ceiling.
+    readonly property int drawerMetricBudget: {
+        var room = root.drawerMaxHeight - root.drawerHeaderHeight;
+        if (room <= 0) return 0;
+        return Math.max(0, Math.floor(room / Math.max(1, root.drawerMetricBlockHeight)));
     }
 
-    function modeButtonAction() {
-        // Either direction starts COLLAPSED: carrying expansions across a mode
-        // change would hide the change the user just asked for.
-        root.expandedIds = ({});
-        root.densityOverride = !root.compactMode;
+    // The metrics the drawer draws, leading one first, plus how many were cut.
+    function drawerSlice(provider) {
+        if (!provider || !provider.metrics) return { metrics: [], omitted: 0 };
+        var lead = root.leadingMetric(provider.metrics);
+        var ordered = [];
+        if (lead !== null) ordered.push(lead);
+        for (var i = 0; i < provider.metrics.length; i++) {
+            if (provider.metrics[i] !== lead) ordered.push(provider.metrics[i]);
+        }
+        var budget = root.drawerMetricBudget;
+        if (budget <= 0) return { metrics: [], omitted: ordered.length };
+        return {
+            metrics: ordered.slice(0, budget),
+            omitted: Math.max(0, ordered.length - budget)
+        };
     }
 
-    // Is there anything list-shaped to toggle at all? A provider with a single
-    // quota has nothing to expand, so the control would be inert.
-    readonly property bool canToggleAny: {
-        var provs = root.model && root.model.all ? root.model.all : [];
-        for (var i = 0; i < provs.length; i++) {
-            var pr = provs[i];
-            if (pr && pr.metrics && pr.metrics.length > 1) return true;
+    // The drawer is cut by what REALLY fits, not by the estimate above alone
+    // (T49). The estimate counts metric blocks; it knows nothing about the
+    // readings, the counter line or `Collapse`, so near the ceiling the last
+    // rows were drawn past the panel's clip — measured: `+N more` lost 4-5 px
+    // of its 11 in a side drawer at ceilings 160 and 240, and `Collapse` went
+    // first in a `down` one. Here the counter (and `Collapse`, for `down`) are
+    // reserved first, metrics take what is left, and the readings come last:
+    // they are the only rows that are optional.
+    function drawerFit(provider, direction) {
+        var base = root.drawerSlice(provider);
+        var total = base.metrics.length + base.omitted;
+        var meta = drawerMetaMeasure.implicitHeight;
+        var gap = root.drawerRowGap;
+        var metricHeight = meta + root.s + Math.max(4 * root.s, meta);
+        var down = direction === "down";
+        var ceiling = down ? root.drawerDownCeiling : root.drawerMaxHeight;
+        var fixed = down ? root.drawerDownFixedHeight
+                         : root.drawerDownFixedHeight - 22 * root.s - gap;
+        var n = base.metrics.length, need = 0;
+        for (; n >= 0; n--) {
+            need = fixed + n * (metricHeight + gap) + (total - n > 0 ? meta + gap : 0);
+            if (need <= ceiling) break;
         }
-        return false;
+        if (n < 0) n = 0;
+        var readings = 0;
+        if (root.showDetail && n > 0)
+            readings = root.usageReadings(base.metrics[0], Date.now() / 1000).filter(
+                function (r) { return r.kind !== "usage"; }).length;
+        var withReadings = need + readings * (meta + gap);
+        var show = readings > 0 && withReadings <= ceiling;
+        return {
+            metrics: base.metrics.slice(0, n),
+            omitted: total - n,
+            readings: show,
+            height: show ? withReadings : need
+        };
     }
 
-    function toggleAll() {
-        if (root.anyProviderExpanded) {
-            root.expandedIds = ({});
-            return;
+    // Measure text with the same fonts as the drawer instead of treating the
+    // configured ceiling as the content's natural height.
+    Text { id: drawerTitleMeasure; visible: false; text: "Ag"; font.family: Theme.font; font.pixelSize: root.fsTitle }
+    Text { id: drawerMetaMeasure; visible: false; text: "Ag"; font.family: Theme.mono; font.pixelSize: root.fsMeta }
+
+    readonly property real lateralReservedHeight: {
+        var providers = root.visibleSecondaries;
+        var largest = 0;
+        for (var i = 0; i < providers.length; i++)
+            largest = Math.max(largest, root.drawerFit(providers[i], "left").height);
+        return Math.min(root.drawerMaxHeight, largest);
+    }
+
+    // T39 — the drawer's identity must survive a poll and must NOT migrate.
+    // `service.model` is replaced wholesale every poll, so the drawer is reopened
+    // by ID, and it closes when the id stops being a visible secondary: it left
+    // the report, became the primary, or fell out of `maxSecondary` /
+    // `showSecondaries`. It never hands itself to whoever now sits in that cell.
+    onModelChanged: root.reconcileDrawer()
+
+    function reconcileDrawer() {
+        if (root.openDrawerId === "") return;
+        // A hidden section has no visible secondary: the drawer has to close, or
+        // turning the section back on would reveal a drawer nobody opened in this
+        // view. Contract item 9 names this as one of the three exit paths.
+        if (!root.showSecondary) { root.openDrawerId = ""; return; }
+        // `visibleSecondaries`, not `secondaryProviders`: a provider cut by
+        // `maxSecondary` is just as gone as one that left the report.
+        var list = root.visibleSecondaries;
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && String(list[i].id) === root.openDrawerId) return;
         }
-        var todos = {};
-        var provs = root.model && root.model.all ? root.model.all : [];
-        for (var i = 0; i < provs.length; i++) {
-            if (provs[i] && provs[i].id !== undefined) todos[String(provs[i].id)] = true;
-        }
-        root.expandedIds = todos;
+        root.openDrawerId = "";
     }
 
     // One line at the top says the situation without walking every bar. It counts
@@ -862,11 +1018,21 @@ Item {
     // The framePopout sizes the body by doing `implicitWidth/Height * root.s`, so
     // the intrinsic dimensions go in HERE without multiplying by `s`.
     // `widthBudget` arrives from the host already multiplied.
-    readonly property real baseWidth: 430
+    // (T33) baseWidth itself is derived from `columns` — see the layout block.
     readonly property real available: widthBudget > 0 ? widthBudget : baseWidth * root.s
     readonly property real padX: pad * root.s
     readonly property real padY: Math.round(pad * 0.8) * root.s
     readonly property real contentWidth: Math.max(160 * root.s, available - 2 * padX)
+    // Pill width is derived, never constant: with the columns setting the popout
+    // widens (baseWidth) and the pills fill it exactly. A floor keeps a 4-column
+    // layout from producing unusable slivers on a narrow placement.
+    readonly property real pillWidth: Math.max(120 * root.s,
+        Math.floor((root.contentWidth - (root.columns - 1) * root.gap * root.s) / root.columns))
+    // Two columns: leave approximately half a pill visible beyond the gap.
+    readonly property real drawerPanelWidth: Math.max(180 * root.s,
+        Math.floor(root.columns === 2
+            ? root.contentWidth - root.pillWidth / 2 - root.gap * root.s
+            : root.contentWidth * 0.45))
 
     implicitWidth: baseWidth
     implicitHeight: Math.max(1, (col.implicitHeight + 2 * padY) / Math.max(0.001, root.s))
@@ -965,76 +1131,147 @@ Item {
     }
 
 
-    // The per-provider expander (T28, contract item 3). It is NOT global: expanding
-    // one provider must leave the others exactly as they were. It only exists when
-    // there IS something hidden — a control that does nothing is noise.
-    component Expander: Item {
-        id: exp
-        property var provider
-        // The chip is a control, not prose: it sits at the `meta` step, which is
-        // the same weight as the count it announces. Passed as a role (never a raw
-        // number) so it cannot drift away from the scale (Att2).
-        // Already scaled: `fsMeta` carries `s`, so the Text must NOT multiply
-        // again. (Doing `fsMeta / s` here and `* s` there was a needless round trip
-        // that also risked dividing by zero when the host reports s = 0.)
-        property real fontSize: root.fsMeta
-        // Visibility uses `canToggleProvider`, NOT "hidden > 0": the control has to
-        // stay on screen while expanded, otherwise it could never collapse back.
-        readonly property int hidden: root.hiddenMetricCountForLabel(exp.provider)
-        // NOT `readonly property bool expanded: root.isExpanded(...)`: that is a
-        // FUNCTION call, so QML cannot see the dependency on `expandedIds` and the
-        // chip never repainted on toggle — it said "+2 more" while expanded
-        // (measured 2026-10-29). Reading the property IN the expression is what
-        // makes the dependency visible to the engine.
-        readonly property bool expanded: {
-            var ids = root.expandedIds;   // the dependency, read here on purpose
-            var id = exp.provider ? exp.provider.id : "";
-            return ids !== null && ids !== undefined && ids[id] === true;
-        }
-        visible: root.canToggleProvider(exp.provider)
-        width: visible ? expLabel.implicitWidth + 14 * root.s : 0
-        height: visible ? expLabel.implicitHeight + 5 * root.s : 0
+    // A secondary as a PILL (T34). Two rules shape it:
+    //   1. it always carries NAME + BAR + PERCENT. The bar alone does not say
+    //      WHICH provider it belongs to, and the percentage is what makes the
+    //      reading legible without colour (R11/WCAG SC 1.4.1).
+    //   2. its states are words, never colour: ERROR, STALE, NO DATA. `0%` draws
+    //      an empty track; a MISSING percentage draws no track and an em dash
+    //      (T30 — conflating those two was a real defect).
+    component Pill: Rectangle {
+        id: pil
+        required property var provider
+        property bool opened: false
 
-        // Drawn as a CHIP, not as loose text.
-        //
-        // It used to be bare "+2 more" in `faint` (the timestamp's weight) with no
-        // border, sitting right after the provider name. The owner could not tell it
-        // was a control at all: "o botão que aciona isso não está intuitivo"
-        // (Att1, 2026-10-29). A border and a caret say "this is pressable and it
-        // does something to the list"; the `+N`/`−` glyph says WHICH way.
-        Rectangle {
-            anchors.fill: parent
-            radius: height / 2
-            color: expMouse.containsMouse ? Theme.threadBg : "transparent"
-            border.width: 1
-            border.color: expMouse.containsMouse ? Theme.lineStrong : Theme.lineStrong
-            opacity: expMouse.containsMouse ? 1.0 : 0.75
-        }
+        readonly property var lead: root.leadingMetric(pil.provider ? pil.provider.metrics : null)
+        readonly property bool hasMetrics: pil.provider && pil.provider.metrics
+                                           && pil.provider.metrics.length > 0
+        readonly property bool isError: pil.provider && pil.provider.status === "error"
+        readonly property bool isStale: pil.provider && pil.provider.stale === true
+        // A provider in `error` has NO usable reading: whatever percentage its
+        // metrics still carry is stale noise from before the failure, and drawing
+        // a track for it would show a quota bar next to the word ERROR. T34.2 says
+        // ERROR takes the bar's place, so the bar and the percentage both go.
+        readonly property bool hasPercent: !pil.isError
+            && pil.lead !== null && pil.lead !== undefined
+            && pil.lead.percent !== null && pil.lead.percent !== undefined
+            && isFinite(Number(pil.lead.percent))
 
-        Text {
-            id: expLabel
-            anchors.centerIn: parent
-            // Not `faint` unless idle: the chevron carries the state, the text the
-            // count. Both are legible on hover.
-            color: expMouse.containsMouse || exp.expanded ? Theme.bright : Theme.faint
-            font.family: Theme.mono
-            font.pixelSize: exp.fontSize
-            font.letterSpacing: 0.3 * root.s
-            text: {
-                // A caret in front, so the direction of the click is visible before
-                // reading the words: down = "there is more below", up = "close it".
-                var caret = exp.expanded ? "\u25B4" : "\u25BE";
-                return caret + " " + (exp.expanded
-                    ? root.tr("less")
-                    : root.tr("+%1 more", exp.hidden));
+        width: root.pillWidth
+        // The owner's reference: the height of a Windows action-center button.
+        // 44 logical px is the floor that keeps the target comfortable; the scale
+        // factor still multiplies it, so it grows with the user's UI scale.
+        height: Math.max(44 * root.s, pillCol.implicitHeight + 10 * root.s)
+        // A soft corner, not `height / 2`. Copying the popout's own corner radius
+        // keeps ONE corner language across the surface: with a capsule pill
+        // the popout's rounded card framed fully-round tablets, and the two read
+        // as different design systems inside one panel (owner's report,
+        // 2026-10-30). `PluginKit`'s Theme exposes no widget radius (its `radius`
+        // is 0, the website's brutalist square), and the shell's `radiusWidget`
+        // (8) is not reachable from a plugin, so the value is spelled out here
+        // with `s` applied. Capped by half the height so a short pill (heavy text
+        // scale) still rounds sanely instead of clipping its own curve.
+        radius: Math.min(root.pillCorner * root.s, height / 2)
+        color: pillMouse.containsMouse || pil.opened ? Theme.threadBg : "transparent"
+        border.width: 1
+        // `opened` is a STATE, and it is carried by the border plus the caret in
+        // the name row — not by colour alone.
+        border.color: pil.opened ? Theme.bright : Theme.lineStrong
+        opacity: pillMouse.containsMouse ? 1.0 : 0.92
+
+        Column {
+            id: pillCol
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: 12 * root.s
+            anchors.rightMargin: 12 * root.s
+            spacing: 3 * root.s
+
+            Row {
+                width: parent.width
+                spacing: 4 * root.s
+
+                Text {
+                    id: pillName
+                    width: Math.max(0, parent.width - pillState.implicitWidth - parent.spacing)
+                    elide: Text.ElideRight
+                    // An error comes out in colour AND in a word (never colour alone)
+                    color: pil.isError ? Theme.sun : Theme.bright
+                    font.family: Theme.font
+                    font.pixelSize: root.fsTitle
+                    text: pil.provider ? ((pil.isError ? "! " : "")
+                                          + root.secondaryName(pil.provider)) : ""
+                }
+                Text {
+                    id: pillState
+                    visible: text !== ""
+                    color: pil.isError ? Theme.sun : Theme.faint
+                    font.family: Theme.mono
+                    font.pixelSize: root.fsMeta
+                    font.letterSpacing: 0.5 * root.s
+                    // Words, not colour: this is the state channel.
+                    text: {
+                        if (!pil.provider) return "";
+                        if (pil.isError) return root.tr("ERROR");
+                        if (!pil.hasMetrics) return root.tr("NO DATA");
+                        if (pil.isStale) return root.tr("STALE");
+                        // The caret says the pill opens a drawer below/beside it.
+                        return pil.opened ? "\u25B4" : "\u25BE";
+                    }
+                }
+            }
+
+            // The bar of the LEADING metric, with its percentage outside the track.
+            Item {
+                width: parent.width
+                height: Math.max(root.fsValue, 4 * root.s)
+
+                Text {
+                    id: pillPct
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Theme.bright
+                    font.family: Theme.mono
+                    font.pixelSize: root.fsValue
+                    // `0%` is a real reading; absence is an em dash. Never the
+                    // same glyph for two different states.
+                    text: {
+                        if (!pil.provider) return "";
+                        if (pil.isError || !pil.hasMetrics) return "";
+                        return pil.hasPercent ? (Math.round(Number(pil.lead.percent)) + "%")
+                                              : "\u2014";
+                    }
+                }
+                Rectangle {
+                    id: pillTrack
+                    anchors.left: parent.left
+                    anchors.right: pillPct.left
+                    anchors.rightMargin: 6 * root.s
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 4 * root.s
+                    radius: height / 2
+                    color: Theme.threadBg
+                    visible: pil.hasPercent
+                    Rectangle {
+                        width: pil.hasPercent
+                               ? parent.width * Math.max(0, Math.min(100, Number(pil.lead.percent))) / 100
+                               : 0
+                        height: parent.height
+                        radius: height / 2
+                        color: root.usageColour(pil.lead ? pil.lead.percent : null, root.accentColor)
+                        Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutExpo } }
+                    }
+                }
             }
         }
+
         MouseArea {
-            id: expMouse
+            id: pillMouse
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: if (exp.provider) root.toggleExpanded(exp.provider.id)
+            onClicked: root.toggleDrawer(pil.provider)
         }
     }
 
@@ -1049,39 +1286,17 @@ Item {
         width: root.contentWidth
         spacing: root.gap * root.s
 
-        // ---- header: operational summary + density toggle (T27 + T28) --------
-        // One row, not two: the whole point of T28 is HEIGHT. The summary takes the
-        // width it needs and the button sits at the far right.
-        //
-        // The button only exists in compact mode — in expanded mode there is
-        // nothing to collapse that the setting has not already decided, and an
-        // inert button is worse than no button.
-        // Header: the summary on its OWN full-width line, the controls on the line
-        // below, right-aligned.
-        //
-        // Why not side by side: with both controls visible in Portuguese the summary
-        // had 231px of the 350 it needs, so it was always chopped short right where
-        // the button started — which reads as the button covering the text ("no
-        // monitor com escala maior, o texto começa a ser tampado pelos botões", P6,
-        // measured 2026-10-29). Squeezing them into one line cannot work: the labels
-        // grow with the scale and with the translation, and there is no threshold to
-        // elide at that is both readable and honest.
-        //
-        // A `Row` of controls was tried and DISCARDED: Qt does not re-run its layout
-        // when a child's `visible` flips, so the two buttons landed on the same x
-        // (measured: both at x=372, `width: childrenRect.width` made it worse by
-        // creating a binding cycle). Anchored buttons in a plain Item do not have
-        // that problem, so they are anchored to each other here.
+        // ---- header: operational summary (T27) ----------------------------
+        // ONE line and no controls. The density pair (mode + expand/collapse) is
+        // gone with the second format (T36): what is left is the sentence that
+        // carries the most urgent news, on its own full-width line. It WRAPS
+        // instead of being cut — squeezing it beside a button chopped it exactly
+        // where the button started (P6, measured 2026-10-29).
         Column {
             id: headerRow
             width: parent.width
-            // Gap only when both lines exist: a lone summary keeps its tight rhythm.
-            spacing: controlsRow.visible ? 5 * root.s : 0
             visible: root.primaryProvider !== null
 
-            // The summary WRAPS instead of being cut, and it spans the full width —
-            // it is the only sentence on the surface and it carries the most urgent
-            // news, so it gets the whole line (P6: "com pouco ênfase").
             Text {
                 id: summaryLine
                 width: parent.width
@@ -1093,84 +1308,6 @@ Item {
                 font.family: Theme.mono
                 font.pixelSize: root.fsBody
                 text: root.operationalSummarySegments(root.model, root.epoch).join("  ·  ")
-            }
-
-            Item {
-                id: controlsRow
-                width: parent.width
-                height: modeButton.height
-                visible: root.primaryProvider !== null
-
-                // LEFT: the list. It exists only in compact mode, because that is
-                // the only mode with a list to expand — in expanded mode every quota
-                // is already shown, so an "Expand absolutely everything" button
-                // would be inert. It is NOT a mode switch.
-                Rectangle {
-                    id: expandButton
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: root.compactMode && root.canToggleAny
-                    width: visible ? expandLabel.implicitWidth + 12 * root.s : 0
-                    height: 16 * root.s
-                    radius: height / 2
-                    color: expandMouse.containsMouse ? Theme.threadBg : "transparent"
-                    border.width: 1
-                    border.color: Theme.lineStrong
-
-                    Text {
-                        id: expandLabel
-                        anchors.centerIn: parent
-                        color: expandMouse.containsMouse ? Theme.bright : Theme.faint
-                        font.family: Theme.mono
-                        font.pixelSize: root.fsMeta
-                        text: root.anyProviderExpanded ? root.tr("Collapse all")
-                                                      : root.tr("Expand all")
-                    }
-                    MouseArea {
-                        id: expandMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleAll()
-                    }
-                }
-
-                // RIGHT: the mode. Always visible, and it names the mode you are
-                // going TO — never the state you are in. It used to require compact
-                // mode already being on, so it was exactly the control you could not
-                // use to GET there (owner report, 2026-10-28).
-                //
-                // `Reset view` was here and is GONE: it existed only because this
-                // button carried two meanings, so nothing could return to the
-                // default view. With the mode switch isolated, the way back is the
-                // button itself (Att1, decided 2026-10-29).
-                Rectangle {
-                    id: modeButton
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: modeLabel.implicitWidth + 12 * root.s
-                    height: 16 * root.s
-                    radius: height / 2
-                    color: modeMouse.containsMouse ? Theme.threadBg : "transparent"
-                    border.width: 1
-                    border.color: Theme.lineStrong
-
-                    Text {
-                        id: modeLabel
-                        anchors.centerIn: parent
-                        color: modeMouse.containsMouse ? Theme.bright : Theme.faint
-                        font.family: Theme.mono
-                        font.pixelSize: root.fsMeta
-                        text: root.modeButtonLabel()
-                    }
-                    MouseArea {
-                        id: modeMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.modeButtonAction()
-                    }
-                }
             }
         }
 
@@ -1225,21 +1362,15 @@ Item {
             width: parent.width
             spacing: 4 * root.s
 
-            Row {
+            // T36: the primary no longer has an expander — there is only one
+            // format, so every metric is always shown below this name.
+            Text {
                 width: parent.width
-                spacing: 6 * root.s
-                Text {
-                    width: Math.max(0, parent.width - primNameGap.width)
-                    elide: Text.ElideRight
-                    color: Theme.bright
-                    font.family: Theme.font
-                    font.pixelSize: root.fsDisplay
-                    text: root.primaryProvider ? root.primaryProvider.display_name : ""
-                }
-                Expander {
-                    id: primNameGap
-                    provider: root.primaryProvider
-                }
+                elide: Text.ElideRight
+                color: Theme.bright
+                font.family: Theme.font
+                font.pixelSize: root.fsDisplay
+                text: root.primaryProvider ? root.primaryProvider.display_name : ""
             }
             Text {
                 width: parent.width
@@ -1265,7 +1396,10 @@ Item {
             Repeater {
                 // T28: in compact mode only the leading metric shows, unless the
                 // user expanded this provider.
-                model: root.visibleMetrics(root.primaryProvider)
+                // T36: the primary always shows EVERY metric. The old compact
+                // mode hid all but the leading one behind an expander.
+                model: root.primaryProvider && root.primaryProvider.metrics
+                       ? root.primaryProvider.metrics : []
                 delegate: Column {
                     required property var modelData
                     width: parent.width
@@ -1360,7 +1494,7 @@ Item {
         // null and the host fell back to 680x520. The result on screen was a huge,
         // empty body.
         Item {
-            visible: root.showSecondary && root.secondaryProviders.length > 0
+            visible: root.showSecondary && root.visibleSecondaries.length > 0
             width: parent.width
             height: 18 * root.s
             Row {
@@ -1374,7 +1508,7 @@ Item {
                     font.family: Theme.mono
                     font.pixelSize: root.fsTitle
                     font.letterSpacing: 1.4 * root.s
-                    text: root.tr("OTHER PROVIDERS") + " " + root.secondaryProviders.length + "/" + root.totalSecondary
+                    text: root.tr("OTHER PROVIDERS") + " " + root.visibleSecondaries.length + "/" + root.totalSecondary
                 }
                 Item {
                     width: Math.max(0, parent.width - sepLabel.implicitWidth - parent.spacing)
@@ -1387,158 +1521,337 @@ Item {
             }
         }
 
-        // ---- secondaries: one per row, with a cooldown where one exists -----
-        Repeater {
-            model: root.showSecondary ? root.secondaryProviders : []
-            delegate: Column {
-                required property var modelData
-                width: col.width
-                spacing: 4 * root.s
+        // ---- pills area: grid of secondaries + the drawer (T35, T37, T38) ----
+        // Down adds a row below the grid. Laterally the grid slides inside a
+        // clipped viewport while the drawer enters from the selected side.
+        //
+        // The order of the pills is `model.secondary` VERBATIM: the five order
+        // modes stay in the collector, and the grid never re-sorts (T35).
+        Item {
+            id: pillsArea
+            width: parent.width
+            visible: root.showSecondary && root.visibleSecondaries.length > 0
+            height: {
+                var gridH = pillGrid.implicitHeight;
+                if (root.drawerDirection !== "down")
+                    return Math.max(gridH, root.lateralReservedHeight);
+                if (!drawerPanel.visible) return gridH;
+                if (drawerPanel.direction !== "down")
+                    return Math.max(gridH, drawerPanel.height);
+                // Push the content down while there is room under the grid;
+                // past that the drawer overlaps the grid from the base (T48).
+                var pushed = gridH + root.gap * root.s + drawerPanel.height;
+                // The area itself never outgrows the limit: a drawer taller
+                // than grid + room rises above the grid as well (it is anchored
+                // to the base and painted over what precedes it).
+                var limit = gridH + Math.max(0, root.downRoom);
+                return Math.max(gridH, Math.min(pushed, limit));
+            }
 
-                Rectangle {
-                    width: parent.width
-                    height: 1 * root.s
-                    color: Theme.lineStrong
-                    opacity: 0.65
+            // It is a `Grid`, NOT a `Row`: measured in T28 (2026-10-29) that Qt does
+            // not re-run a Row's layout when a child's `visible` flips, which is why
+            // the old control row landed two buttons on the same x.
+            //
+            // Keep the grid's columns and shift the whole grid, not individual pills.
+            Item {
+                id: gridViewport
+                width: parent.width
+                height: pillGrid.implicitHeight
+                y: root.drawerDirection === "down" ? 0 : Math.max(0, parent.height - height)
+                clip: true
+
+            Grid {
+                id: pillGrid
+                columns: root.columns
+                columnSpacing: root.gap * root.s
+                rowSpacing: root.gap * root.s
+                width: parent.width
+                x: drawerPanel.open && drawerPanel.direction !== "down"
+                   ? (drawerPanel.direction === "left" ? 1 : -1)
+                     * (drawerPanel.width + root.gap * root.s)
+                   : 0
+                Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
+
+                Repeater {
+                    model: (root.showSecondary && root.visibleSecondaries) ? root.visibleSecondaries : []
+                    delegate: Pill {
+                        required property var modelData
+                        provider: modelData
+                        opened: root.isDrawerOpen(modelData)
+                    }
+                }
+            }
+            }
+
+            // --- the drawer panel
+            Rectangle {
+                id: drawerPanel
+                readonly property var provider: {
+                    var list = root.secondaryProviders;
+                    for (var i = 0; i < list.length; i++)
+                        if (list[i] && String(list[i].id) === root.openDrawerId) return list[i];
+                    return null;
+                }
+                readonly property bool open: provider !== null && root.openDrawerId !== ""
+                readonly property string direction: root.drawerDirection
+                readonly property var slice: root.drawerFit(provider, direction)
+
+                visible: open
+                // Keep the lateral panel within the host's clipped body and
+                // align its base with the displaced grid.
+                anchors.bottom: parent.bottom
+                width: direction === "down" ? parent.width : Math.min(parent.width, root.drawerPanelWidth)
+                x: direction === "down" ? 0
+                   : direction === "left" ? (open ? 0 : -width)
+                   : (open ? Math.max(0, parent.width - width) : parent.width)
+                Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
+                height: Math.min(direction === "down" ? root.drawerDownCeiling : root.drawerMaxHeight,
+                                 drawerCol.implicitHeight + 20 * root.s)
+                radius: Math.min(root.pillCorner * root.s, height / 2)
+                z: 2
+                // OPAQUE surface, not `Theme.threadBg`. `threadBg` is
+                // `Qt.rgba(accent, 0.13)` — a 13%-opacity tint that is right for a
+                // pill's HOVER wash, where the panel behind it should show through.
+                // Used as the drawer's fill it let the grid be read straight
+                // through the panel: the owner's smoke test saw "OpenRouter 88%"
+                // and "SYNTHETIC" printed ON TOP of the drawer's own text. A panel
+                // that carries numbers has to sit on an opaque surface; the pill
+                // wash is the wrong tool for it.
+                color: Theme.tileBg
+                border.width: 1
+                border.color: Theme.lineStrong
+                clip: true
+
+                // A `down` drawer can now sit over the lower pills. Without this
+                // a click on the panel fell through to the pill underneath and
+                // swapped the provider behind the user's back.
+                //
+                // Only while the panel really covers pills: with room under the
+                // grid nothing is beneath it, and an always-on catcher is one more
+                // clickable thing in the drawer for no reason.
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: drawerPanel.direction === "down" && drawerPanel.open
+                             && drawerPanel.y < pillGrid.implicitHeight - 0.5
+                             && drawerPanel.y + drawerPanel.height > 0
+                    visible: enabled
                 }
 
-                // Provider content, indented from the line: the line marks the
-                // group boundary, the indent separates the block from the provider
-                // above it.
-                Item {
-                    id: block
-                    x: root.secondaryIndent
-                    width: parent.width - root.secondaryIndent
-                    height: inner.implicitHeight
+                Column {
+                    id: drawerCol
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 10 * root.s
+                    anchors.leftMargin: drawerPanel.direction === "right" ? 34 * root.s : 10 * root.s
+                    anchors.rightMargin: drawerPanel.direction === "left" ? 34 * root.s : 10 * root.s
+                    spacing: 4 * root.s
 
-                    Column {
-                        id: inner
+                    // name + status/plan
+                    Text {
                         width: parent.width
-                        spacing: 3 * root.s
-
-                        Row {
-                            width: parent.width
-                            spacing: 5 * root.s
-                            Text {
-                                width: Math.max(0, parent.width - secExpander.width)
-                                elide: Text.ElideRight
-                                // an error comes out in colour AND in a word (never colour alone)
-                                color: modelData.status === "error" ? Theme.sun : Theme.bright
-                                font.family: Theme.font
-                                font.pixelSize: root.fsTitle
-                                text: (modelData.status === "error" ? "! " : "")
-                                      + root.secondaryName(modelData)
-                            }
-                            Expander {
-                                id: secExpander
-                                provider: modelData
-                            }
+                        elide: Text.ElideRight
+                        color: Theme.bright
+                        font.family: Theme.font
+                        font.pixelSize: root.fsTitle
+                        text: {
+                            var p = drawerPanel.provider;
+                            if (!p) return "";
+                            return (p.status === "error" ? "! " : "") + root.secondaryName(p);
                         }
-                Repeater {
-                            model: root.visibleMetrics(modelData)
-                            delegate: Column {
-                                required property var modelData
+                    }
+                    Text {
+                        width: parent.width
+                        elide: Text.ElideRight
+                        color: Theme.faint
+                        font.family: Theme.mono
+                        font.pixelSize: root.fsMeta
+                        font.letterSpacing: 0.6 * root.s
+                        text: {
+                            var p = drawerPanel.provider;
+                            if (!p) return "";
+                            if (p.status === "error")
+                                return root.redactText(p.error || root.tr("ERROR")).toUpperCase();
+                            var plan = root.redactText(p.plan);
+                            var base = plan ? plan.toUpperCase() : String(p.id).toUpperCase();
+                            if (p.stale) base += " · " + root.tr("STALE");
+                            return base;
+                        }
+                    }
+
+                    // one row per metric that FITS: label, percent, reset + the bar.
+                    // Lead metric first — the same rule as the pill (F020).
+                    Repeater {
+                        model: drawerPanel.slice.metrics
+                        delegate: Column {
+                            required property var modelData
+                            width: parent.width
+                            spacing: 1 * root.s
+
+                            Row {
                                 width: parent.width
-                                spacing: 1 * root.s
-                                Row {
-                                    width: parent.width
-                                    spacing: 5 * root.s
-                                    Text {
-                                        width: Math.max(0, parent.width - reset.implicitWidth - parent.spacing)
-                                        elide: Text.ElideRight
-                                        color: Theme.faint
-                                        font.family: Theme.mono
-                                        font.pixelSize: root.fsMeta
-                                        font.letterSpacing: 0.5 * root.s
-                                        text: modelData.label ? modelData.label.toUpperCase() : "USAGE"
-                                    }
-                                    Text {
-                                        id: reset
-                                        color: Theme.faint
-                                        font.family: Theme.mono
-                                        font.pixelSize: root.fsMeta
-                                        font.letterSpacing: 0.4 * root.s
-                                        text: root.resetLabel(modelData.reset_at)
-                                    }
-                                }
-                                Meter {
-                                    width: parent.width
-                                    thickness: 3 * root.s
-                                    // `fsBody`, NOT `fsValue * 0.78`: the scaled variant
-                                    // landed 1px under `body` at s>=1.5 — a sixth step
-                                    // created by arithmetic, invisible at s=1 and a
-                                    // half-step at every larger scale. A secondary's
-                                    // number is body text; it does not get its own step.
-                                    valueFontSize: root.fsBody
-                                    metric: modelData
-                                    // T24/T25 apply to EVERY quota, not only the
-                                    // highlighted one. Leaving this out made the
-                                    // marker and the readings privilege whichever
-                                    // provider happened to be expanded — found by
-                                    // external review, 2026-10-28.
-                                    elapsedPercent: {
-                                        var el = root.elapsedRatio(modelData, root.epoch)
-                                        return el.valid ? el.percent : -1
-                                    }
-                                }
-                                // The same three labelled readings as the primary,
-                                // one size down. Compact mode already limits them.
-                                Repeater {
-                                    model: root.usageReadings(modelData, root.epoch)
-                                    delegate: Row {
-                                        required property var modelData
-                                        width: parent.width
-                                        spacing: 4 * root.s
-                                        visible: modelData.kind === "usage" || root.showDetail
-                                        height: visible ? implicitHeight : 0
-                                        Text {
-                                            visible: modelData.label !== ""
-                                            color: Theme.faint
-                                            font.family: Theme.mono
-                                            font.pixelSize: root.fsMeta
-                                            text: modelData.label ? (modelData.label + ":") : ""
-                                        }
-                                        Text {
-                                            color: modelData.kind === "pace" && modelData.ahead ? Theme.sun : Theme.faint
-                                            font.family: Theme.mono
-                                            font.pixelSize: root.fsMeta
-                                            elide: Text.ElideRight
-                                            text: modelData.value
-                                        }
-                                    }
-                                }
-                                // Absence of a percentage is stated here too, so a
-                                // secondary never silently shows nothing.
+                                spacing: 5 * root.s
                                 Text {
-                                    visible: (modelData.percent === null || modelData.percent === undefined)
+                                    width: Math.max(0, parent.width - drawerPct.implicitWidth
+                                                    - drawerReset.implicitWidth - 2 * parent.spacing)
+                                    elide: Text.ElideRight
                                     color: Theme.faint
                                     font.family: Theme.mono
                                     font.pixelSize: root.fsMeta
-                                    text: "—"
+                                    font.letterSpacing: 0.5 * root.s
+                                    text: modelData.label ? modelData.label.toUpperCase() : root.tr("USAGE")
+                                }
+                                Text {
+                                    id: drawerPct
+                                    color: Theme.bright
+                                    font.family: Theme.mono
+                                    font.pixelSize: root.fsMeta
+                                    text: {
+                                        var v = modelData.percent;
+                                        if (v === null || v === undefined || !isFinite(Number(v)))
+                                            return "\u2014";
+                                        return Math.round(Number(v)) + "%";
+                                    }
+                                }
+                                Text {
+                                    id: drawerReset
+                                    color: Theme.faint
+                                    font.family: Theme.mono
+                                    font.pixelSize: root.fsMeta
+                                    text: root.resetLabel(modelData.reset_at)
+                                }
+                            }
+                            Meter {
+                                width: parent.width
+                                thickness: 4 * root.s
+                                valueFontSize: root.fsMeta
+                                metric: modelData
+                                elapsedPercent: {
+                                    var el = root.elapsedRatio(modelData, root.epoch)
+                                    return el.valid ? el.percent : -1
                                 }
                             }
                         }
-                        Text {
-                            visible: text !== ""
+                    }
+
+                    // Readings of the LEADING metric only: the three labelled lines
+                    // are what made the old detail tall, and the pill already carries
+                    // usage. Elapsed and pace stay reachable here (T24 preserved).
+                    Repeater {
+                        model: (root.showDetail && drawerPanel.slice.metrics.length > 0
+                                && drawerPanel.slice.readings)
+                               ? root.usageReadings(drawerPanel.slice.metrics[0], root.epoch).filter(
+                                     function (r) { return r.kind !== "usage"; })
+                               : []
+                        delegate: Row {
+                            required property var modelData
                             width: parent.width
-                            elide: Text.ElideRight
-                            color: Theme.faint
-                            font.family: Theme.mono
-                            font.pixelSize: root.fsMeta
-                            font.letterSpacing: 0.6 * root.s
-                            // stale and error come out in TEXT: colour alone is not information
-                            text: {
-                                // No blind cut — this Text's `elide` decides.
-                                if (modelData.status === "error")
-                                    return root.redactText(modelData.error || root.tr("ERROR")).toUpperCase();
-                                if (modelData.stale) return root.tr("STALE");
-                                return "";
+                            spacing: 5 * root.s
+                            Text {
+                                visible: modelData.label !== ""
+                                color: Theme.faint
+                                font.family: Theme.mono
+                                font.pixelSize: root.fsMeta
+                                text: modelData.label ? (modelData.label + ":") : ""
+                            }
+                            Text {
+                                color: modelData.kind === "pace" && modelData.ahead ? Theme.sun : Theme.faint
+                                elide: Text.ElideRight
+                                font.family: Theme.mono
+                                font.pixelSize: root.fsMeta
+                                text: modelData.value
+                            }
+                        }
+                    }
+
+                    // The cut is ANNOUNCED in inert text: it is not a control and
+                    // must not look like one (D7). It counts METRICS omitted.
+                    Text {
+                        width: parent.width
+                        visible: text !== ""
+                        color: Theme.faint
+                        font.family: Theme.mono
+                        font.pixelSize: root.fsMeta
+                        text: drawerPanel.slice.omitted > 0
+                              ? root.tr("+%1 more", drawerPanel.slice.omitted) : ""
+                    }
+
+                    // Collapse: a real control — at the FOOT of a downward drawer,
+                    // at the END of the expanded side for a lateral one (D6).
+                    Item {
+                        width: parent.width
+                        height: drawerPanel.direction === "down" ? collapseBtn.height : 0
+                        visible: drawerPanel.direction === "down"
+
+                        Rectangle {
+                            id: collapseBtn
+                            width: collapseLabel.implicitWidth + 16 * root.s
+                            height: 22 * root.s
+                            radius: height / 2
+                            color: collapseMouse.containsMouse ? Theme.lineStrong : "transparent"
+                            border.width: 1
+                            border.color: Theme.lineStrong
+                            anchors.right: drawerPanel.direction === "left" ? undefined : parent.right
+                            anchors.left: drawerPanel.direction === "left" ? parent.left : undefined
+
+                            Text {
+                                id: collapseLabel
+                                anchors.centerIn: parent
+                                color: collapseMouse.containsMouse ? Theme.bright : Theme.faint
+                                font.family: Theme.mono
+                                font.pixelSize: root.fsMeta
+                                text: root.tr("Collapse")
+                            }
+                            MouseArea {
+                                id: collapseMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.closeDrawer()
                             }
                         }
                     }
                 }
+
+                Rectangle {
+                    width: 24 * root.s
+                    height: parent.height
+                    x: drawerPanel.direction === "left" ? parent.width - width : 0
+                    visible: drawerPanel.direction !== "down"
+                    Accessible.role: Accessible.Button
+                    Accessible.name: root.tr("Collapse")
+                    color: returnMouse.containsMouse ? Theme.lineStrong : Theme.threadBg
+                    Text {
+                        anchors.centerIn: parent
+                        color: Theme.bright
+                        font.pixelSize: root.fsTitle
+                        text: drawerPanel.direction === "left" ? "→" : "←"
+                    }
+                    MouseArea {
+                        id: returnMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.closeDrawer()
+                    }
+                }
+            }
+
+            Rectangle {
+                z: 3
+                visible: drawerPanel.open && drawerPanel.direction !== "down"
+                width: 12 * root.s
+                height: gridViewport.height
+                y: gridViewport.y
+                x: drawerPanel.direction === "left" ? parent.width - width : 0
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: drawerPanel.direction === "left" ? "transparent" : Theme.tileBg }
+                    GradientStop { position: 1; color: drawerPanel.direction === "left" ? Theme.tileBg : "transparent" }
+                }
             }
         }
+
         // ---- footer (T30) --------------------------------------------------
         // Only when there is something to say: an age, a problem count, or a
         // refresh in flight. Otherwise it hides rather than drawing a bare rule.
@@ -1546,7 +1859,7 @@ Item {
             id: footer
             width: parent.width
             height: visible
-                    ? (root.staleData
+                    ? 7 * root.s + (root.staleData
                         ? footerText.implicitHeight + staleReason.implicitHeight + 3 * root.s
                         : Math.max(footerText.implicitHeight, refreshButton.height))
                     : 0
@@ -1570,9 +1883,16 @@ Item {
             Text {
                 id: footerText
                 anchors.left: parent.left
-                anchors.right: refreshButton.left
+                anchors.right: copyButton.left
                 anchors.rightMargin: 8 * root.s
-                anchors.bottom: parent.bottom
+                // CENTRE against the buttons' row, not `bottom`. The buttons are
+                // 18px tall pill targets while this text is one 8px line (~11px
+                // tall): anchoring both to `parent.bottom` left the text sitting
+                // lower than the buttons' optical centre, which read as a
+                // misalignment in the owner's smoke test (2026-10-30). Anchoring
+                // the text's middle to the buttons' middle keeps them on one line
+                // whatever the text scale does to either height.
+                anchors.verticalCenter: refreshButton.verticalCenter
                 elide: Text.ElideRight
                 font.family: Theme.mono
                 font.pixelSize: root.fsMeta
@@ -1599,7 +1919,7 @@ Item {
             }
 
             // WHY it failed, next to the age. Elided, because an upstream message
-            // ("network transport error: error sending request for url (https://...")
+            // ("network transport error: error sending request for url ...")
             // is long and the beginning is the useful part. Hidden entirely when
             // there is no stale data, so a healthy panel gains no line.
             Text {
@@ -1613,6 +1933,60 @@ Item {
                 font.family: Theme.mono
                 font.pixelSize: root.fsMeta
                 text: root.redactText(root.lastError)
+            }
+
+            // T44 / decisão 11: the keybind became a COPY button. The old
+            // `keybindHint` text field asked the user to retype a command the
+            // plugin already knows; this hands over the exact string instead.
+            //
+            // `Quickshell.clipboardText` was measured on 2026-10-29: writable from
+            // inside a plugin popout and it arrives on the Wayland clipboard.
+            //
+            // The glyph changes for a moment after the click, because a copy
+            // with no feedback is indistinguishable from a dead button — and a
+            // button you click twice "just in case" is worse than one that says
+            // it worked.
+            property string copyState: "idle"   // idle | copied
+            Timer {
+                id: copyReset
+                interval: 1400; repeat: false
+                onTriggered: footer.copyState = "idle"
+            }
+            readonly property string keybindCommand: "ryoku-shell plugin ai-usage"
+
+            Rectangle {
+                id: copyButton
+                anchors.right: refreshButton.left
+                anchors.rightMargin: 6 * root.s
+                anchors.bottom: parent.bottom
+                width: copyLabel.implicitWidth + 12 * root.s
+                height: 18 * root.s
+                radius: height / 2
+                color: copyMouse.containsMouse ? Theme.threadBg : "transparent"
+                border.width: 1
+                border.color: footer.copyState === "copied" ? Theme.bright : Theme.lineStrong
+
+                Text {
+                    id: copyLabel
+                    anchors.centerIn: parent
+                    color: footer.copyState === "copied" ? Theme.bright : Theme.faint
+                    font.family: Theme.mono
+                    font.pixelSize: root.fsMeta
+                    // Words, not colour: the state channel is the text itself.
+                    text: footer.copyState === "copied" ? root.tr("Copied")
+                                                      : root.tr("Copy keybind")
+                }
+                MouseArea {
+                    id: copyMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        Quickshell.clipboardText = footer.keybindCommand;
+                        footer.copyState = "copied";
+                        copyReset.restart();
+                    }
+                }
             }
 
             // The manual refresh. Same MouseArea pattern the density button uses —

@@ -16,6 +16,12 @@
 //   T19R_STATE_DIR  stateDir sintético
 //   T19R_WIDTH      widthBudget do host (default 260)
 //   T19R_SETTLE_MS  espera antes de despejar (default 3500)
+//   T19R_DRAWER_ID  id do secundário cuja GAVETA abre antes do despejo (default "")
+//                   R4: o diagnóstico de um secundário deixou de viver na lista e
+//                   passou a viver na gaveta, então o texto de erro só chega à
+//                   árvore com ela aberta. A abertura acontece DEPOIS de o modelo
+//                   chegar: aberta em `onLoaded`, `reconcileDrawer()` a fecharia
+//                   no primeiro poll, por ainda não haver secundário nenhum.
 //
 // Saída (stdout, um registro por linha; o consumidor parseia por prefixo):
 //   VIEW_PRESENT|<true|false>
@@ -77,7 +83,7 @@ ShellRoot {
                 item.density = "full"
                 item.widthBudget = root.widthBudget
             } catch (e) { console.log("VIEW_ERR|view: " + e) }
-            settle.restart()
+            openDrawer.restart()
         }
     }
 
@@ -129,6 +135,18 @@ ShellRoot {
         Qt.quit()
     }
 
+    // See T19R_DRAWER_ID above: open late, never at load time.
+    property string drawerId: Quickshell.env("T19R_DRAWER_ID") || ""
+    Timer {
+        id: openDrawer; interval: 400; repeat: false
+        onTriggered: {
+            try {
+                var v = viewL.item
+                if (v && root.drawerId !== "") v.openDrawerId = root.drawerId
+            } catch (e) { console.log("VIEW_ERR|drawer: " + e) }
+            settle.restart()
+        }
+    }
     Timer { id: settle; interval: root.settleMs; repeat: false; onTriggered: root.finish("settle") }
     Timer {
         id: watchdog

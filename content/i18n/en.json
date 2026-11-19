@@ -36,5 +36,8 @@
   "NO PROVIDERS": "NO PROVIDERS",
   "Compact": "Compact",
   "refresh failed, showing earlier reading": "refresh failed, showing earlier reading",
-  "Expanded": "Expanded"
+  "Expanded": "Expanded",
+  "Collapse": "Collapse",
+  "Copied": "Copied",
+  "Copy keybind": "Copy keybind"
 }

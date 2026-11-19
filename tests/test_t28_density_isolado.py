@@ -467,6 +467,9 @@ def test_artefatos_sob_teste_existem():
     assert (PLUGIN_DIR / "content" / "Widget.qml").is_file(), "content/Widget.qml ausente"
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_as_funcoes_puras_e_as_duas_propriedades_existem(bancada):
     assert bancada.view_present, (
         "a view não montou; erros=%s; nada a exercitar" % bancada.erros
@@ -494,6 +497,9 @@ def test_as_funcoes_puras_e_as_duas_propriedades_existem(bancada):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_density_expanded_e_o_padrao(bancada):
     """``expanded`` é o default declarado; a view começa exatamente nele."""
     f = bancada.fase("inicial")
@@ -501,6 +507,9 @@ def test_density_expanded_e_o_padrao(bancada):
         "com density='expanded' (o default do contrato), compactByDefault deveria "
         "ser false; veio %r" % (f.compact_default,)
     )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_density_ausente_cai_no_default_expanded(bancada_default):
@@ -521,6 +530,9 @@ def test_density_ausente_cai_no_default_expanded(bancada_default):
         "visíveis; veio %r"
         % ([(pid, f.visiveis(pid)) for pid in IDS],)
     )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_density_compact_encurta_o_que_e_desenhado(bancada):
@@ -571,6 +583,9 @@ def test_density_compact_encurta_o_que_e_desenhado(bancada):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_expanded_mostra_todas_as_metricas(bancada):
     f = bancada.fase("inicial")
     for pid in IDS:
@@ -580,6 +595,9 @@ def test_expanded_mostra_todas_as_metricas(bancada):
             "métricas na ordem do relatório: %r; veio %r"
             % (pid, esperado, f.visiveis(pid))
         )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_compact_mostra_so_a_metrica_de_maior_percent(bancada):
@@ -606,6 +624,9 @@ def test_compact_mostra_so_a_metrica_de_maior_percent(bancada):
         )
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_compact_nao_esvazia_um_provider_com_metricas(bancada):
     """Negativo: compacto é "só a líder", nunca "nenhuma"."""
     f = bancada.fase("compact")
@@ -616,6 +637,9 @@ def test_compact_nao_esvazia_um_provider_com_metricas(bancada):
             "[%s] em compacto o provider ficou em branco; o contrato diz 'só a "
             "métrica mais crítica', não 'nenhuma'" % (pid,)
         )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_provider_em_erro_continua_sem_metrica(bancada):
@@ -679,6 +703,9 @@ def test_leading_metric_com_lista_vazia_nao_quebra(bancada):
     )
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_leading_metric_do_provider_real_e_a_da_interface(bancada):
     """``visibleMetrics`` em compacto concorda com ``leadingMetric`` no provider.
 
@@ -698,6 +725,9 @@ def test_leading_metric_do_provider_real_e_a_da_interface(bancada):
 # --------------------------------------------------------------------------- #
 # Item 3 — controle POR PROVIDER, isolação
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_expandir_um_provider_nao_expande_os_outros(bancada):
@@ -734,6 +764,9 @@ def test_expandir_um_provider_nao_expande_os_outros(bancada):
         )
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_a_isencao_e_simetrica_no_outro_provider(bancada):
     """O mesmo, olhando o provider que NÃO foi tocado ficar expandido."""
     antes = bancada.fase("compact")
@@ -744,6 +777,9 @@ def test_a_isencao_e_simetrica_no_outro_provider(bancada):
     assert depois.prov(OUTRO)["expanded"] is False, (
         "[%s] passou a expandido quando o alvo foi %r" % (OUTRO, ALVO)
     )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_any_provider_expanded_reflete_o_estado(bancada):
@@ -758,6 +794,9 @@ def test_any_provider_expanded_reflete_o_estado(bancada):
     )
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_hidden_metric_count_e_zero_em_expanded(bancada):
     """``hiddenMetricCount`` = 0 em modo expanded: não há controle para mostrar."""
     f = bancada.fase("inicial")
@@ -766,6 +805,9 @@ def test_hidden_metric_count_e_zero_em_expanded(bancada):
             "[%s] em modo expanded hiddenMetricCount deveria ser 0; veio %s"
             % (pid, f.ocultas(pid))
         )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_hidden_metric_count_conta_so_o_que_esta_oculto(bancada):
@@ -777,6 +819,9 @@ def test_hidden_metric_count_conta_so_o_que_esta_oculto(bancada):
             "[%s] em compacto, %s métricas → %s ocultas; veio %s"
             % (pid, len(LABELS[pid]), esperado, f.ocultas(pid))
         )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_hidden_metric_count_e_zero_quando_o_provider_esta_expandido(bancada):
@@ -792,6 +837,9 @@ def test_hidden_metric_count_e_zero_quando_o_provider_esta_expandido(bancada):
     )
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_provider_sem_metricas_ocultas_nao_tem_controle(bancada):
     """Um provider sem métricas não ganha um controle inerte."""
     for prefixo in ("inicial", "compact", "compact+1expandido"):
@@ -805,6 +853,9 @@ def test_provider_sem_metricas_ocultas_nao_tem_controle(bancada):
 # --------------------------------------------------------------------------- #
 # Item 4 — o botão do topo, por CLIQUE
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_existe_um_clicavel_que_expande_todos(bancada):
@@ -827,6 +878,9 @@ def test_existe_um_clicavel_que_expande_todos(bancada):
     )
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_o_clique_do_botao_do_topo_expande_todos_os_providers(bancada):
     """E expande TODOS os de ``model.all`` — o contrato é explícito."""
     cliques_all = [c for c in bancada.cliques if c["all"]]
@@ -842,6 +896,9 @@ def test_o_clique_do_botao_do_topo_expande_todos_os_providers(bancada):
             "o harness clica esse alvo a partir de um set vazio; veio antes=%s"
             % (c["antes"],)
         )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_o_mesmo_botao_recolhe_tudo_no_clique_seguinte(bancada):
@@ -861,6 +918,9 @@ def test_o_mesmo_botao_recolhe_tudo_no_clique_seguinte(bancada):
         "o terceiro clique (a partir de vazio) deveria expandir tudo de novo; foi "
         "de %s (%r) para %s (%r)" % (antes2, ka2, depois2, kd2)
     )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_toggle_all_alterna_a_partir_de_estado_vazio(bancada):
@@ -883,6 +943,9 @@ def test_toggle_all_alterna_a_partir_de_estado_vazio(bancada):
     )
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_toggle_all_nao_alcanca_provider_fora_de_model_all(bancada):
     """``model.all`` é a lista; nada de inventar ids de outra fonte."""
     for passo in (1, 2):
@@ -893,6 +956,9 @@ def test_toggle_all_nao_alcanca_provider_fora_de_model_all(bancada):
                     "toggleAll colocou no set um id que não existe em model.all: %r "
                     "(ids=%r)" % (k, IDS)
                 )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_o_clique_num_provider_expande_so_ele(bancada):
@@ -917,6 +983,9 @@ def test_o_clique_num_provider_expande_so_ele(bancada):
         )
 
 
+@pytest.mark.skip(reason="R4/T42: passa por VACUIDADE no formato único — sem expansão alguma, a propriedade que ele mede é trivially verdadeira. A propriedade real (no máximo UMA gaveta aberta) é medida em test_t42_formato_unico_isolado.py.")
+
+
 def test_nenhum_clique_expande_dois_providers_de_uma_vez(bancada):
     """Negativo do item 3: não existe clique intermediário (2 de 3).
 
@@ -937,6 +1006,9 @@ def test_nenhum_clique_expande_dois_providers_de_uma_vez(bancada):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
+
+
 def test_o_estado_de_expansao_nao_persiste_ao_remontar(bancada):
     """Decisão do dono (2026-10-28): o estado de expansão morre com a surface.
 
@@ -952,6 +1024,9 @@ def test_o_estado_de_expansao_nao_persiste_ao_remontar(bancada):
         "ids). Estado volátil não sobrevive à surface." 
         % (bancada.remount_ids, bancada.remount_count)
     )
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_a_expansao_nao_e_gravada_como_setting(bancada):
@@ -977,6 +1052,9 @@ def test_a_expansao_nao_e_gravada_como_setting(bancada):
 # --------------------------------------------------------------------------- #
 # Regressão de contexto: o modelo do host não é mutado
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skip(reason="R4/T42: testa o formato duplo (density/expansão), removido por T36. A garantia equivalente no formato único vive em test_t42_formato_unico_isolado.py; o inventário com o motivo de cada cancelamento está na SPEC, seção T42.")
 
 
 def test_o_modelo_recebido_nao_e_mutado_pelas_consultas(bancada):

@@ -36,5 +36,8 @@
   "NO PROVIDERS": "AUCUN FOURNISSEUR",
   "Compact": "Compact",
   "refresh failed, showing earlier reading": "échec de l'actualisation, lecture précédente affichée",
-  "Expanded": "Étendu"
+  "Expanded": "Étendu",
+  "Collapse": "Réduire",
+  "Copied": "Copié",
+  "Copy keybind": "Copier le raccourci"
 }

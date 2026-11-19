@@ -1,11 +1,17 @@
 {
   "id": "ai-usage",
   "name": "AI Usage",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "author": "Danilo Heroso <danmaxis@gmail.com>",
-  "description": "AI plan usage on the Ryoku desktop, from ai-usagebar: a detail surface listing every enabled provider grouped by account, each with its meter, its headline and a live countdown to its reset. Opens from the frame edge or a keybind. Read-only over the local `ai-usagebar usage --json` report; no credentials, no network of its own.",
+  "description": "AI plan usage on the Ryoku desktop, from ai-usagebar: the primary provider in full, every other provider as a pill in a 2-4 column grid, and a drawer with the full detail of the one you click. Opens from the frame edge or a keybind. Read-only over the local `ai-usagebar usage --json` report; no credentials, no network of its own.",
   "license": "MIT",
   "official": false,
+  "tags": [
+    "frame-popout",
+    "ai",
+    "usage",
+    "monitoring"
+  ],
   "hosts": [
     "framePopout"
   ],
@@ -20,6 +26,9 @@
     "content/i18n/es.json",
     "content/i18n/fr.json"
   ],
+  "commands": [
+    "bin/ai-usage-collect"
+  ],
   "capabilities": {
     "densities": [
       "full"
@@ -27,6 +36,11 @@
   },
   "defaults": {
     "host": "framePopout",
+    "framePopout": {
+      "edge": "center",
+      "align": "center"
+    },
+    "icon": "data_usage",
     "label": "AI Usage"
   },
   "dependencies": {
@@ -130,10 +144,43 @@
       {
         "key": "primary",
         "type": "text",
-        "label": "Pinned provider",
+        "label": "Pinned provider (exact id)",
         "group": "Data",
         "placeholder": "anthropic",
         "default": ""
+      },
+      {
+        "key": "primaryChoice",
+        "type": "choice",
+        "label": "Pinned provider — all order modes",
+        "group": "Data",
+        "default": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto"
+          },
+          {
+            "value": "anthropic",
+            "label": "Anthropic"
+          },
+          {
+            "value": "openai",
+            "label": "OpenAI"
+          },
+          {
+            "value": "copilot",
+            "label": "GitHub Copilot"
+          },
+          {
+            "value": "openrouter",
+            "label": "OpenRouter"
+          },
+          {
+            "value": "synthetic",
+            "label": "Synthetic"
+          }
+        ]
       },
       {
         "key": "showMetricDetail",
@@ -163,6 +210,47 @@
         "default": 6
       },
       {
+        "key": "columns",
+        "type": "slider",
+        "label": "Columns",
+        "group": "Layout",
+        "min": 2,
+        "max": 4,
+        "decimals": 0,
+        "default": 2
+      },
+      {
+        "key": "drawerDirection",
+        "type": "choice",
+        "label": "Drawer direction",
+        "group": "Layout",
+        "default": "down",
+        "options": [
+          {
+            "value": "down",
+            "label": "Down"
+          },
+          {
+            "value": "left",
+            "label": "Left"
+          },
+          {
+            "value": "right",
+            "label": "Right"
+          }
+        ]
+      },
+      {
+        "key": "drawerMaxHeight",
+        "type": "slider",
+        "label": "Drawer max height",
+        "group": "Layout",
+        "min": 160,
+        "max": 480,
+        "decimals": 0,
+        "default": 320
+      },
+      {
         "key": "secondaryLabel",
         "type": "choice",
         "label": "Secondary label",
@@ -186,14 +274,14 @@
       {
         "key": "showSecondaries",
         "type": "toggle",
-        "label": "Show secondary row",
+        "label": "Show secondary pills",
         "group": "Layout",
         "default": true
       },
       {
         "key": "maxSecondary",
         "type": "slider",
-        "label": "Sec. rows",
+        "label": "Secondary pills",
         "group": "Data",
         "min": 0,
         "max": 12,
@@ -209,23 +297,6 @@
         "max": 3600,
         "decimals": 0,
         "default": 300
-      },
-      {
-        "key": "density",
-        "type": "choice",
-        "label": "Density",
-        "group": "Layout",
-        "default": "expanded",
-        "options": [
-          {
-            "value": "expanded",
-            "label": "Expanded (all metrics)"
-          },
-          {
-            "value": "compact",
-            "label": "Compact (one per provider)"
-          }
-        ]
       },
       {
         "key": "keybindHint",

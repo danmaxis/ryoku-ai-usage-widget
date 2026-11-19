@@ -77,8 +77,19 @@ Item {
     // Primary pinned by the user (a report id). Empty = pin nothing and let the
     // collector choose by order. `--primary` ALWAYS existed in the collector, but
     // no setting forwarded it: it was unreachable code (T16).
+    //
+    // T41 — TWO ways to pin, one precedence rule: the TEXT field wins whenever it
+    // is filled, because only text can name an account (`openai@work`) and the
+    // chips cannot. The chip is the convenience path for the bare vendor ids.
+    // `auto` is the absence of a choice, never an id: sending `--primary auto`
+    // would ask the collector for a provider called "auto".
+    readonly property string pinnedChip: {
+        var v = settings ? String(settings.primaryChoice || "auto").trim() : "auto";
+        return (v === "" || v === "auto") ? "" : v;
+    }
     readonly property string pinnedPrimary: {
-        return settings ? String(settings.primary || "").trim() : "";
+        var text = settings ? String(settings.primary || "").trim() : "";
+        return text !== "" ? text : svc.pinnedChip;
     }
 
     // The collector's path is NEVER hardcoded: it comes from the host's pluginDir
