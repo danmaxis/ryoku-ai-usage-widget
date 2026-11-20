@@ -176,6 +176,7 @@ def test_provider_expoe_exatamente_os_campos_do_contrato():
         "id", "vendor", "account", "display_name", "short_name", "icon", "plan",
         "status", "stale", "fetched_at", "error", "metrics", "headline_metric",
         "has_reset_credits",
+        "estimate",  # R7-v1: percentual contra teto que não é cota real
     }
     assert set(dados["primary"].keys()) == esperado
 
@@ -185,6 +186,7 @@ def test_metric_normalizada_expoe_exatamente_os_campos_do_contrato():
     esperado = {
         "label", "headline", "kind", "percent", "value", "severity", "detail",
         "reset_at", "window_secs",
+        "estimate",  # R7-v1
     }
     assert set(dados["primary"]["metrics"][0].keys()) == esperado
 
